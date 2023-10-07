@@ -24,8 +24,8 @@ using the heap memory.
 ## How it works
 
 At the beggining of the function/scope, you can create a "stack frame",
-usually through the recommended macro `AS_INIT()` (or manually with
-`as_init(struct alloc_stack *)`)
+usually through the recommended macros `AS_INIT()` or `AS_INITV(COUNT)`
+(or manually with `as_init(struct alloc_stack *)` or the vector counterpart)
 and the use the `as_*alloc` functions to allocate memory.
 
 The frame will keep track of those pointers.
@@ -51,7 +51,7 @@ a thread local "global" variable: `__thread struct alloc_stack *_stack;`.
 
 Effectively creating one stack per thread. (Should make it thread safe-enough).
 
-**AS_INIT macro**
+**AS_INIT/V macro**
 
 The `AS_INIT` macro will create a `struct alloc_stack`, registering it
 for cleanup using the `__attribute__ ((__cleanup__(...)))` and
@@ -66,9 +66,14 @@ The stack/frame structure uses a binary search tree to store
 the pointers it is tracking. This choice was done for quick searches
 when pushing pointers up.
 
-> To avoid extra memory allocation (the BST node) when allocating memory,
-> in the future a simple array (with a limited amount of space)
-> may be used.
+Using an array/vector is also possible instead of the initial BST.
+The reference macro `AS_INITV(COUNT)` creates an array with `COUNT`
+elements (storage for pointers) and passes it to the `as_initv(..)`
+function.
+
+Using the vector initialization functions allows for all extra
+storage (to store the pointers) be allocated in the stack, reducing
+the calls to heap memory allocation, hence reducing margin for errors
 
 **Moving up, outside the stack**
 
@@ -116,7 +121,7 @@ char *xor42(const char *str)
 
 char *concat_xor42(char *a, char *b)
 {
-  AS_INIT();
+  AS_INITV(4);
 
   int len_a = strlen(a);
   int len_b = strlen(b);

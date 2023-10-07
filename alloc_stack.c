@@ -149,6 +149,12 @@ static void node_print(node *n)
   printf("%p ", n->data);
   node_print(n->right);
 }
+static void vector_print(as_t *as)
+{
+  for(int i=0;i<as->vector_size;i++)
+    if(as->vector[i])
+      printf("%p ", as->vector[i]);
+}
 // for debug
 void _print_stack(as_t* as)
 {
@@ -156,7 +162,10 @@ void _print_stack(as_t* as)
     return;
   _print_stack(as->parent);
   puts("----");
-  node_print(as->root);
+  if(as->use_vector)
+    vector_print(as);
+  else
+    node_print(as->root);
   putchar(10);
 }
 
@@ -166,6 +175,32 @@ void print_stack()
   puts("----");
 }
 
+int insert_vector(as_t* ns, void* ptr)
+{
+  for(int i = 0; i<ns->vector_size; i++)
+    if(!ns->vector[i])
+    {
+      ns->vector[i] = ptr;
+      return 0;
+    }
+  return 1;
+}
+
+int remove_vector(as_t* ns, void *ptr)
+{
+  for(int i=0;i<ns->vector_size;i++)
+    if(ns->vector == ptr)
+      return (int)(ns->vector[i] = NULL);  // set and return
+  return 1;
+}
+
+void free_vector(as_t* ns)
+{
+  for(int i=0;i<ns->vector_size;i++)
+    if(ns->vector[i])
+      free(ns->vector[i]);
+}
+
 /*
   public interface
 */
@@ -173,7 +208,18 @@ void print_stack()
 void as_init(as_t *ns)
 {
   ns->parent = _stack;
+  ns->use_vector = 0;
   ns->root = NULL;
+  _stack = ns;
+}
+
+void as_initv(as_t *ns, void ** array, int array_len)
+{
+  ns->parent = _stack;
+  ns->use_vector = 1;
+  ns->vector = array;
+  ns->vector_size = array_len;
+  memset(ns->vector, 0, ns->vector_size*sizeof(void*));
   _stack = ns;
 }
 
@@ -187,7 +233,12 @@ int as_fini()
   as_t* ns = _stack;
   if(!ns)
     return 1;
-  node_free(ns->root);
+  if(!ns->use_vector)
+    node_free(ns->root);
+  else
+    for(int i =0; i < ns->vector_size; i++)
+      if(ns->vector[i])
+        free(ns->vector[i]);
   _stack = ns->parent;
   return 0;
 }
@@ -197,24 +248,39 @@ int as_take(void *ptr)
   as_t *ns = _stack;
   if(!ns)
     return 1;
-  if(insert_node(&ns->root, ptr))
-    return 1;
-  return 0;
+  if(ns->use_vector)
+    return insert_vector(ns, ptr);
+  else
+    return insert_node(&ns->root, ptr);
 }
 
 void *as_malloc(size_t size)
 {
   as_t *ns = _stack;
   if(!ns)
-    return NULL;
+  {
+    // simple malloc
+    return malloc(size);
+  }
   void *ptr = malloc(size);
   if(!ptr)
     return NULL;
 
-  if(insert_node(&ns->root, ptr))
+  if(ns->use_vector)
   {
-    free(ptr);
-    return NULL;
+    if(insert_vector(ns, ptr))
+    {
+      free(ptr);
+      return NULL;
+    }
+  }
+  else
+  {
+    if(insert_node(&ns->root, ptr))
+    {
+      free(ptr);
+      return NULL;
+    }
   }
 
   return ptr;
@@ -236,14 +302,28 @@ void *as_realloc(void *ptr, size_t size)
     return NULL;
 
   void *old_ptr = ptr;
-  if(remove_node(&ns->root, old_ptr))
-    // we don't have it
-    return NULL;
+  if(ns->use_vector)
+  {
+    if(remove_vector(ns, old_ptr))
+      return NULL;
+  }
+  else
+  {
+    if(remove_node(&ns->root, old_ptr))
+      // we don't have it
+      return NULL;
+  }
 
   ptr = realloc(ptr, size);
   if(!ptr)
   {
     // re-insert old
+    if(ns->use_vector)
+    {
+      // we know it fits
+      insert_vector(ns, old_ptr);
+      return NULL;
+    } 
     if(insert_node(&ns->root, old_ptr))
     {
       free(old_ptr);
@@ -251,6 +331,12 @@ void *as_realloc(void *ptr, size_t size)
     return NULL;
   }
 
+  if(ns->use_vector)
+  {
+    // we know it fits
+    insert_vector(ns, old_ptr);
+    return ptr;
+  }
   if(insert_node(&ns->root, ptr))
   {
     // if we fail, old ptr will be NULL
@@ -267,14 +353,28 @@ void *as_reallocarray(void *ptr, size_t nmemb, size_t size)
     return NULL;
 
   void *old_ptr = ptr;
-  if(remove_node(&ns->root, old_ptr))
-    // we don't have it
-    return NULL;
+  if(ns->use_vector)
+  {
+    if(remove_vector(ns, old_ptr))
+      return NULL;
+  }
+  else
+  {
+    if(remove_node(&ns->root, old_ptr))
+      // we don't have it
+      return NULL;
+  }
 
   ptr = reallocarray(ptr, nmemb, size);
   if(!ptr)
   {
     // re-insert old
+    if(ns->use_vector)
+    {
+      // we know it fits
+      insert_vector(ns, old_ptr);
+      return NULL;
+    } 
     if(insert_node(&ns->root, old_ptr))
     {
       free(old_ptr);
@@ -282,6 +382,12 @@ void *as_reallocarray(void *ptr, size_t nmemb, size_t size)
     return NULL;
   }
 
+  if(ns->use_vector)
+  {
+    // we know it fits
+    insert_vector(ns, old_ptr);
+    return ptr;
+  }
   if(insert_node(&ns->root, ptr))
   {
     // if we fail, old ptr will be NULL
@@ -297,9 +403,18 @@ void as_free(void *ptr)
   if(!ns)
     return;
 
-  if(remove_node(&ns->root, ptr))
-    // not ours
-    return;
+  if(ns->use_vector)
+  {
+    if(remove_vector(ns, ptr))
+      // not ours
+      return;
+  }
+  else
+  {
+    if(remove_node(&ns->root, ptr))
+      // not ours
+      return;
+  }
 
   free(ptr);
 }
@@ -310,14 +425,25 @@ int as_up(void *ptr)
   if(!ns)
     return 1;
 
-  if(remove_node(&ns->root, ptr))
-    // not ours
-    return 2;
+  if(ns->use_vector)
+  {
+    if(remove_vector(ns, ptr))
+      return 1;
+  }
+  else
+  {
+    if(remove_node(&ns->root, ptr))
+      // not ours
+      return 2;
+  }
 
   if(!ns->parent)
     // it's not our problem anymore
     return 0;
 
-  return insert_node(&(ns->parent->root), ptr);
+  return
+    ns->parent->use_vector ?
+    insert_node(&(ns->parent->root), ptr)
+    : insert_vector(ns->parent, ptr);
 }
   

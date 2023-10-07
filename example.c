@@ -34,7 +34,8 @@ char *xor42(const char *str)
 
 char *concat_xor42(char *a, char *b)
 {
-  AS_INIT();
+  // use vector here
+  AS_INITV(4);
 
   int len_a = strlen(a);
   int len_b = strlen(b);

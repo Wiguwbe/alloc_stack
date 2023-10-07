@@ -8,7 +8,12 @@ struct alloc_stack
 {
   struct alloc_stack *parent;
 
-  struct ptr_btn *root;
+  union {
+    struct ptr_btn *root;
+    void **vector;
+  };
+  int use_vector;
+  int vector_size;
 };
 
 /*
@@ -19,13 +24,20 @@ struct alloc_stack
 */
 #define AS_INIT() \
   struct alloc_stack __alloc_stack __attribute__ ((__cleanup__(_as_fini))); \
-  as_init(&__alloc_stack);
+  as_init(&__alloc_stack)
+
+#define AS_INITV(COUNT) \
+  void* __alloc_vector[(COUNT)]; \
+  struct alloc_stack __alloc_stack __attribute__ ((__cleanup__(_as_fini))); \
+  as_initv(&__alloc_stack, __alloc_vector, (COUNT))
 
 // mostly internal
 int _as_fini(struct alloc_stack *_unused);
 
 // create stack, passing a alloc_stack struct pointer
 void as_init(struct alloc_stack *);
+// create stack, with pointer array instead of binary search tree
+void as_initv(struct alloc_stack *, void *arr[], int arr_size);
 
 // free alloc stack and all pointers inside
 // NOTE not needed if using `as_init` macro
